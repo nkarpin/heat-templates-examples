@@ -1,0 +1,62 @@
+heat_template_version: 2013-05-23
+
+description: Integration Test AutoScaling with heat+ceilometer+gnocchi+aodh
+
+parameters:
+  server_network:
+    type: string
+    description: Network to boot vm in
+  server_flavor:
+    type: string
+    description: Flavor for test instance
+  server_image:
+    type: string
+    description: Image for test instance
+  aodh_granularity:
+    type: string
+    description: Alarm granularity
+
+resources:
+  asg:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      min_size: 1
+      max_size: 2
+      resource:
+        type: OS::Nova::Server
+        properties:
+          networks:
+            - network: { get_param: server_network }
+          flavor: { get_param: server_flavor }
+          image: { get_param: server_image }
+          metadata: {"metering.server_group": {get_param: "OS::stack_id"}}
+          user_data:
+            get_file: load_my_vm.sh
+  web_server_scaleup_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: asg }
+      cooldown: 2
+      scaling_adjustment: 1
+  cpu_alarm_high:
+    type: OS::Ceilometer::GnocchiAggregationByResourcesAlarm
+    properties:
+      description: Scale-up if the mean CPU > 10% on 1 minute
+      metric: cpu_util
+      aggregation_method: mean
+      granularity: { get_param: aodh_granularity }
+      evaluation_periods: 1
+      threshold: 10
+      comparison_operator: gt
+      alarm_actions:
+        - str_replace:
+            template: trust+url
+            params:
+              url: { get_attr: [ web_server_scaleup_policy, signal_url ] }
+      resource_type: instance
+      query:
+        str_replace:
+          template: "{\"and\": [{\"=\": {\"server_group\": \"stack_id\"}}, {\"=\": {\"ended_at\": null}}]}"
+          params:
+            stack_id: { get_param: "OS::stack_id" }
