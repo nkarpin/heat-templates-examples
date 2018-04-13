@@ -30,6 +30,7 @@ resources:
           flavor: { get_param: server_flavor }
           image: { get_param: server_image }
           metadata: {"metering.server_group": {get_param: "OS::stack_id"}}
+          user_data_format: RAW
           user_data:
             get_file: load_my_vm.sh
   web_server_scaleup_policy:
